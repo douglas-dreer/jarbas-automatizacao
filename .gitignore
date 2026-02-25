@@ -1,0 +1,5 @@
+.\logs\*
+.\wildfly*\**
+.\jarbas.pid
+.\mvnw
+.\mvnw.cmd
