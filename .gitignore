@@ -3,3 +3,5 @@ wildfly*/
 jarbas.pid
 mvnw
 mvnw.cmd
+.\mvnw
+.\projeto
