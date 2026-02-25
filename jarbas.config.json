@@ -1,0 +1,32 @@
+{
+    "java": {
+        "home": "",
+        "bin_dir": ""
+    },
+    "jboss": {
+        "home": "",
+        "deployments_dir": "",
+        "bin_dir": "",
+        "startup_script": "standalone.bat",
+        "startup_timeout": 120,
+        "config": "standalone.xml",
+        "host": "localhost",
+        "port": 9990
+    },
+    "project": {
+        "root_dir": "",
+        "target_dir": "",
+        "artifact_name": "",
+        "artifact_version": "",
+        "packaging": "war"
+    },
+    "maven": {
+        "wrapper": "",
+        "profiles": []
+    },
+    "log": {
+        "file": "",
+        "level": "INFO",
+        "max_size_mb": 5
+    }
+}
