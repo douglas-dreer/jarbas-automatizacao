@@ -1,8 +1,4 @@
-﻿# ==============================
-# PARAMS
-# ==============================
-
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Position = 0)]
     [ValidateSet("start", "stop", "restart", "deploy", "undeploy", "start-deploy", "status", "remove", "help")]
@@ -16,10 +12,9 @@ param(
     [switch]$Help
 )
 
-
-
-# Ensure UTF-8 output for banner and logs
+# Force ASCII/green terminal feel
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$Host.UI.RawUI.ForegroundColor = 'Green'
 
 # ==============================
 # HELP METADATA
@@ -27,44 +22,44 @@ param(
 
 $CommandHelp = @{
     start          = @{
-        Description = "Starts the JBoss server."
+        Description = "Initializes the JBoss application server process."
         Usage       = "jarbas.ps1 start"
-        Details     = "Initializes the environment and waits until the management port becomes available."
+        Details     = "Sets environment variables and polls management port until server responds or timeout."
     }
     stop           = @{
-        Description = "Stops the JBoss server."
+        Description = "Terminates the JBoss application server process."
         Usage       = "jarbas.ps1 stop"
-        Details     = "Uses jboss-cli shutdown and waits until the management port is closed."
+        Details     = "Issues :shutdown via jboss-cli.bat and waits for port closure."
     }
     restart        = @{
-        Description = "Performs a graceful reload."
+        Description = "Stop followed by start. Full cycle."
         Usage       = "jarbas.ps1 restart"
-        Details     = "Uses :reload via JBoss CLI and monitors the restart cycle."
+        Details     = "Calls :reload via JBoss CLI and monitors restart cycle."
     }
     deploy         = @{
-        Description = "Builds with Maven Wrapper and deploys to JBoss."
+        Description = "Compile, package via Maven Wrapper and deploy artifact to JBoss."
         Usage       = "jarbas.ps1 deploy [-SkipTest] [-DryRun]"
-        Details     = "Runs mvnw.cmd clean package; copies the built artifact to the JBoss deployments directory and creates a .dodeploy marker."
+        Details     = "Runs mvnw.cmd clean package. Copies artifact to deployments dir. Creates .dodeploy marker."
     }
     undeploy       = @{
-        Description = "Undeploy artifact on jBoss."
-        Usage       = "jarbas.ps1 undeploy "
-        Details     = "Using o jboss-client undeploy artifact"
+        Description = "Undeploy artifact from JBoss via CLI."
+        Usage       = "jarbas.ps1 undeploy"
+        Details     = "Calls jboss-cli undeploy and polls for marker file removal."
     }
     remove         = @{
-        Description = "Removes the deployed artifact from JBoss deployments."
+        Description = "Physically removes artifact from JBoss deployments directory."
         Usage       = "jarbas.ps1 remove"
-        Details     = "Deletes the artifact from the JBoss deployments directory and clears deployment markers."
+        Details     = "Deletes artifact file and all associated deployment marker files."
     }
     "start-deploy" = @{
-        Description = "Builds/deploys the artifact and then starts the server."
+        Description = "Full pipeline: build, deploy, then boot server."
         Usage       = "jarbas.ps1 start-deploy [-SkipTest] [-DryRun]"
-        Details     = "Combines the deploy workflow followed by the startup workflow."
+        Details     = "Combines deploy workflow followed immediately by startup workflow."
     }
     status         = @{
-        Description = "Displays the current server status."
+        Description = "Reports current server state to operator."
         Usage       = "jarbas.ps1 status"
-        Details     = "Shows PID, status, and port availability."
+        Details     = "Checks PID file and TCP port. Prints ONLINE or OFFLINE."
     }
 }
 
@@ -73,29 +68,73 @@ $CommandHelp = @{
 # ==============================
 
 function Show-Banner {
-    # Save and temporarily change console color
-    $originalColor = $Host.UI.RawUI.ForegroundColor
-    $Host.UI.RawUI.ForegroundColor = 'Cyan'
-
-    $banner = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::UTF8.GetBytes(@"
-
-     ██╗ █████╗ ██████╗ ██████╗  █████╗ ███████╗
-     ██║██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔════╝
-     ██║███████║██████╔╝██████╔╝███████║███████╗
-██   ██║██╔══██║██╔══██╗██╔══██╗██╔══██║╚════██║
-╚█████╔╝██║  ██║██║  ██║██████╔╝██║  ██║███████║
- ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝
- 
-"@))
-
-    Write-Host $banner
-
-    # Restore color
-    $Host.UI.RawUI.ForegroundColor = $originalColor
+    $Host.UI.RawUI.ForegroundColor = 'Green'
 
     Write-Host ""
-    Write-Host "              Jarbas Enterprise CLI v1.5.0" -ForegroundColor DarkGray
+    Write-Host "  +===========================================================+"
+    Write-Host "  |                                                           |"
+    Write-Host "  |     ###    ###    ###    ###  ###  ####    ####   ####   |"
+    Write-Host "  |      ##     ##     ##   ###   ###  ##  ##  ##  ## ##     |"
+    Write-Host "  |      ##    ####    ##  ###    ###  ##  ##  ####   ####   |"
+    Write-Host "  |  ##  ##   ##  ##   ## ###     ###  ##  ##  ##  ##     ## |"
+    Write-Host "  |   ####   ###  ###  #####      ###  ####   ####   ####    |"
+    Write-Host "  |                                                           |"
+    Write-Host "  +===========================================================+"
+    Write-Host "         JARBAS ENTERPRISE CLI  --  VER 1.0.0"
+    Write-Host "         BUILD/DEPLOY/MANAGE :: JBOSS/WILDFLY SUBSYSTEM"
+    Write-Host "  +-----------------------------------------------------------+"
     Write-Host ""
+}
+
+# ==============================
+# RETRO TYPEWRITER OUTPUT
+# ==============================
+
+function Write-Retro {
+    param(
+        [string]$Message,
+        [int]$DelayMs = 0
+    )
+    Write-Host $Message -ForegroundColor Green
+    if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+}
+
+function Write-RetroWarn {
+    param([string]$Message)
+    Write-Host "  *** WARNING *** $Message" -ForegroundColor Yellow
+}
+
+function Write-RetroError {
+    param([string]$Message)
+    Write-Host "  !!! ERROR !!! $Message" -ForegroundColor Red
+}
+
+function Write-RetroOK {
+    param([string]$Message)
+    Write-Host "  [ OK ] $Message" -ForegroundColor Green
+}
+
+# ==============================
+# RETRO SPINNER / PROGRESS
+# ==============================
+
+$script:SpinnerIdx = 0
+$script:SpinnerFrames = @('-', '\', '|', '/')
+
+function Write-Spinner {
+    param([string]$Label)
+    $frame = $script:SpinnerFrames[$script:SpinnerIdx % 4]
+    $script:SpinnerIdx++
+    Write-Host "`r  [$frame] $Label..." -NoNewline -ForegroundColor Green
+}
+
+function Write-TickerBar {
+    param([int]$Elapsed, [int]$Total, [string]$Label)
+    $pct = [math]::Min([int](($Elapsed / $Total) * 20), 20)
+    $filled = "#" * $pct
+    $empty = "." * (20 - $pct)
+    $line = "  [$filled$empty]  $Elapsed / $Total SEC  $Label"
+    Write-Host "`r$line" -NoNewline -ForegroundColor Green
 }
 
 # ==============================
@@ -110,28 +149,26 @@ function Get-Command-Description($cmd) {
 }
 
 function Show-Help {
-
     Show-Banner
 
-    Write-Host "USAGE:" -ForegroundColor Yellow
-    Write-Host "  jarbas.ps1 <command> [options]"
+    Write-Host "  SYNTAX:" -ForegroundColor Yellow
+    Write-Host "    jarbas.ps1 <COMMAND> [OPTIONS]"
     Write-Host ""
-
-    Write-Host "AVAILABLE COMMANDS:" -ForegroundColor Yellow
+    Write-Host "  COMMANDS:" -ForegroundColor Yellow
     foreach ($cmd in $CommandHelp.Keys) {
-        "{0,-15} {1}" -f ("  " + $cmd), $CommandHelp[$cmd].Description
+        "    {0,-16} {1}" -f $cmd, $CommandHelp[$cmd].Description
     }
-
     Write-Host ""
-    Write-Host "OPTIONS:" -ForegroundColor Yellow
-    Write-Host "  -SkipTest       Skip Maven tests during build"
-    Write-Host "  -DryRun         Show actions without executing them"
-    Write-Host "  -VerboseLog     Enable verbose logging"
-    Write-Host "  -Help           Show this help"
+    Write-Host "  OPTIONS:" -ForegroundColor Yellow
+    Write-Host "    -SkipTest       Bypass Maven test phase"
+    Write-Host "    -DryRun         Print actions, do not execute"
+    Write-Host "    -VerboseLog     Enable debug-level log output"
+    Write-Host "    -Help           Display this screen"
     Write-Host ""
-
-    Write-Host "TIP:" -ForegroundColor Yellow
-    Write-Host "  jarbas.ps1 help start"
+    Write-Host "  EXAMPLE:" -ForegroundColor Yellow
+    Write-Host "    jarbas.ps1 help start"
+    Write-Host ""
+    Write-Host "  +-----------------------------------------------------------+"
     Write-Host ""
 }
 
@@ -139,7 +176,7 @@ function Show-CommandHelp {
     param([string]$CmdName)
 
     if (-not $CommandHelp.ContainsKey($CmdName)) {
-        Write-Host "Unknown command: $CmdName" -ForegroundColor Red
+        Write-RetroError "UNKNOWN COMMAND: $CmdName"
         return
     }
 
@@ -147,24 +184,16 @@ function Show-CommandHelp {
 
     $cmd = $CommandHelp[$CmdName]
 
-    Write-Host "COMMAND:" -ForegroundColor Yellow
-    Write-Host "  $CmdName"
+    Write-Host "  COMMAND  : $CmdName" -ForegroundColor Yellow
+    Write-Host "  DESC     : $($cmd.Description)"
+    Write-Host "  SYNTAX   : $($cmd.Usage)"
+    Write-Host "  DETAILS  : $($cmd.Details)"
     Write-Host ""
-
-    Write-Host "DESCRIPTION:" -ForegroundColor Yellow
-    Write-Host "  $($cmd.Description)"
-    Write-Host ""
-
-    Write-Host "USAGE:" -ForegroundColor Yellow
-    Write-Host "  $($cmd.Usage)"
-    Write-Host ""
-
-    Write-Host "DETAILS:" -ForegroundColor Yellow
-    Write-Host "  $($cmd.Details)"
+    Write-Host "  +-----------------------------------------------------------+"
     Write-Host ""
 }
 
-# If no command is provided → show help and exit
+# If no command → help and exit
 if (-not $Command -or $Help) {
     Show-Help
     exit 0
@@ -189,7 +218,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigFile = Join-Path $ScriptDir "jarbas.config.json"
 
 if (-not (Test-Path $ConfigFile)) {
-    Write-Host "Config file not found: $ConfigFile"
+    Write-RetroError "CONFIG FILE NOT FOUND: $ConfigFile"
     exit 1
 }
 
@@ -207,9 +236,12 @@ function Write-Log {
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $line = "[$timestamp] [$Level] $Message"
 
-    # Show all except DEBUG unless -VerboseLog is on
     if ($VerboseLog -or $Level -ne "DEBUG") {
-        Write-Host $line
+        switch ($Level) {
+            "ERROR" { Write-RetroError $Message }
+            "WARN" { Write-RetroWarn  $Message }
+            default { Write-Retro      "  >> $Message" }
+        }
     }
 
     Add-Content -Path $LogFile -Value $line
@@ -217,11 +249,10 @@ function Write-Log {
 
 function Show-InputError {
     param([string]$Message)
-    Write-Host "❌ $Message" -ForegroundColor Red
+    Write-RetroError $Message
     Write-Host ""
     Show-Help
 }
-
 
 function Die {
     param([string]$Message)
@@ -251,67 +282,67 @@ function Test-Port {
 }
 
 # ==============================
-# DEPLOY (Maven Wrapper + Deploy to JBoss)
+# DEPLOY  (Maven Wrapper + JBoss copy)
 # ==============================
 
 function Deploy {
 
-    Write-Log "INFO" "Starting deploy process..."
+    Write-Log "INFO" "DEPLOY SEQUENCE INITIATED"
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | PHASE 1 :: ENVIRONMENT SETUP                              |"
+    Write-Retro "  +-----------------------------------------------------------+"
 
-    # Enforce Java from config (affects mvnw.cmd)
     $env:JAVA_HOME = $cfg.java.home
     $env:Path = "$($cfg.java.bin_dir);$env:Path"
 
-    # Validate config
     $mvnw = $cfg.maven.wrapper
     if (-not (Test-Path $mvnw)) {
-        Die "Maven Wrapper not found: $mvnw"
+        Die "MAVEN WRAPPER NOT FOUND: $mvnw"
     }
 
     $projRoot = $cfg.project.root_dir
     $targetDir = $cfg.project.target_dir
     if (-not (Test-Path $projRoot)) {
-        Die "Project root not found: $projRoot"
+        Die "PROJECT ROOT NOT FOUND: $projRoot"
     }
 
-    $deployDir = $cfg.jboss.deployments_dir  # fixed: consistent casing 'jboss'
+    $deployDir = $cfg.jboss.deployments_dir
     if (-not (Test-Path $deployDir)) {
-        Die "JBoss deployments directory does not exist: $deployDir"
+        Die "DEPLOYMENTS DIR NOT FOUND: $deployDir"
     }
 
     $artifactName = $cfg.project.artifact_name
     $artifactVersion = $cfg.project.artifact_version
     $packaging = $cfg.project.packaging
-    if (-not $packaging) { $packaging = "war" }  # default
+    if (-not $packaging) { $packaging = "war" }
 
-    # Artifact patterns (with and without version)
     $patternWithVersion = "$artifactName*$artifactVersion*.$packaging"
     $patternNoVersion = "$artifactName*.$packaging"
 
-    # Build arguments
     $mvnArgs = "clean package"
     if ($SkipTest) {
         $mvnArgs += " -DskipTests"
-        Write-Log "INFO" "SkipTest enabled"
+        Write-Log "INFO" "TESTS DISABLED (-DskipTests)"
     }
 
-    # Dry run mode: show intent and stop
     if ($DryRun) {
-        Write-Host "DRY RUN: $mvnw $mvnArgs (wd: $projRoot)"
-        Write-Host "DRY RUN: Will search artifact in: $targetDir\($patternWithVersion | $patternNoVersion)"
-        Write-Host "DRY RUN: Will copy to: $deployDir and create .dodeploy"
-        Write-Log "INFO" "DryRun - Deploy not executed"
+        Write-Retro ""
+        Write-Retro "  *** DRY RUN MODE -- NO CHANGES WILL BE MADE ***"
+        Write-Retro "  CMD  : $mvnw $mvnArgs"
+        Write-Retro "  SCAN : $targetDir"
+        Write-Retro "  DEST : $deployDir"
+        Write-Log "INFO" "DRY RUN -- DEPLOY NOT EXECUTED"
         return
     }
 
-    # Build log file capturing Maven stdout/stderr
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | PHASE 2 :: MAVEN BUILD                                    |"
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Log "INFO" "EXECUTING: $mvnw $mvnArgs"
+
     $buildLog = Join-Path $ScriptDir "maven-build.log"
     if (Test-Path $buildLog) { Remove-Item $buildLog -Force -ErrorAction SilentlyContinue }
 
-    Write-Log "INFO" "Executing Maven Wrapper: $mvnw $mvnArgs"
-    Write-Host "Starting build... this may take a few moments."
-
-    # Start Maven process with output redirection and a simple progress bar
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $mvnw
     $psi.Arguments = $mvnArgs
@@ -332,33 +363,33 @@ function Deploy {
             $line = $proc.StandardOutput.ReadLine()
             Add-Content -Path $buildLog -Value $line
             $lines++
-            if ($lines % 30 -eq 0) {
-                Write-Progress -Activity "Project build" -Status "$lines lines processed" -PercentComplete 0
-            }
         }
-        Start-Sleep -Milliseconds 60
+        Write-Spinner "BUILD IN PROGRESS  LINES $lines"
+        Start-Sleep -Milliseconds 200
     }
 
-    # Flush remaining stdout/stderr
+    Write-Host ""   # end spinner line
+
     while (-not $proc.StandardOutput.EndOfStream) {
-        $line = $proc.StandardOutput.ReadLine()
-        Add-Content -Path $buildLog -Value $line
+        Add-Content -Path $buildLog -Value $proc.StandardOutput.ReadLine()
     }
     while (-not $proc.StandardError.EndOfStream) {
-        $line = $proc.StandardError.ReadLine()
-        Add-Content -Path $buildLog -Value $line
+        Add-Content -Path $buildLog -Value $proc.StandardError.ReadLine()
     }
 
     if ($proc.ExitCode -ne 0) {
-        Write-Log "ERROR" "Maven build failed (ExitCode=$($proc.ExitCode)). Check: $buildLog"
-        Write-Host "❌ Build failed. See: $buildLog" -ForegroundColor Red
+        Write-Log "ERROR" "MAVEN BUILD FAILED  EXIT CODE=$($proc.ExitCode)"
+        Write-RetroError "BUILD FAILED -- SEE LOG: $buildLog"
         return
     }
 
-    Write-Log "INFO" "Maven build finished successfully"
-    Write-Host "✔ Build completed" -ForegroundColor Green
+    Write-Log "INFO" "MAVEN BUILD COMPLETE"
+    Write-RetroOK "BUILD SUCCESSFUL"
 
-    # Locate the artifact (try with version, then fallback)
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | PHASE 3 :: ARTIFACT LOCATION                              |"
+    Write-Retro "  +-----------------------------------------------------------+"
+
     $artifact = Get-ChildItem -Path $targetDir -Filter $patternWithVersion -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $artifact) {
@@ -367,26 +398,27 @@ function Deploy {
     }
 
     if (-not $artifact) {
-        Die "No .$packaging artifact found in '$targetDir' (patterns: '$patternWithVersion' / '$patternNoVersion')."
+        Die "NO ARTIFACT FOUND IN $targetDir  PATTERN: $patternNoVersion"
     }
 
-    Write-Log "INFO" "Artifact found: $($artifact.FullName)"
+    Write-Log "INFO" "ARTIFACT LOCATED: $($artifact.FullName)"
 
-    # Copy artifact to JBoss deployments
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | PHASE 4 :: COPY TO DEPLOYMENTS DIR                        |"
+    Write-Retro "  +-----------------------------------------------------------+"
+
     $destFile = Join-Path $deployDir $artifact.Name
-    Write-Log "INFO" "Copying artifact to deployments: $destFile"
+    Write-Log "INFO" "COPY TO: $destFile"
 
     try {
         Copy-Item -Path $artifact.FullName -Destination $destFile -Force
     }
     catch {
-        Die "Failed to copy artifact to '$deployDir': $($_.Exception.Message)"
+        Die "COPY FAILED: $($_.Exception.Message)"
     }
 
-    # Create .dodeploy marker to force deployment
     $doDeploy = "$destFile.dodeploy"
     try {
-        # Clean previous markers for the same artifact name if any exist
         @(
             "$destFile.dodeploy", "$destFile.deployed", "$destFile.failed",
             "$destFile.isdeploying", "$destFile.isundeploying", "$destFile.undeployed"
@@ -395,14 +427,15 @@ function Deploy {
         }
 
         New-Item -Path $doDeploy -ItemType File -Force | Out-Null
-        Write-Log "INFO" "Created deployment marker: $doDeploy"
+        Write-Log "INFO" "MARKER CREATED: $doDeploy"
     }
     catch {
-        Die "Failed to create .dodeploy marker: $($_.Exception.Message)"
+        Die "MARKER CREATION FAILED: $($_.Exception.Message)"
     }
 
-    Write-Host "✔ Deploy submitted to JBoss (wait for .dodeploy processing)" -ForegroundColor Green
-    Write-Log "INFO" "Deploy finished successfully"
+    Write-RetroOK "DEPLOY SUBMITTED -- AWAITING .DODEPLOY PROCESSING"
+    Write-Log "INFO" "DEPLOY SEQUENCE COMPLETE"
+    Write-Retro "  +-----------------------------------------------------------+"
 }
 
 # ==============================
@@ -411,23 +444,24 @@ function Deploy {
 
 function Start-JBoss {
 
-    Write-Log "INFO" "Starting JBoss"
+    Write-Log "INFO" "JBOSS STARTUP SEQUENCE"
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | INITIATING SERVER BOOT                                    |"
+    Write-Retro "  +-----------------------------------------------------------+"
 
     $scriptPath = Join-Path $cfg.jboss.bin_dir $cfg.jboss.startup_script
 
     if ($DryRun) {
-        Write-Host "DRY RUN: $scriptPath -c $($cfg.jboss.config)"
+        Write-Retro "  *** DRY RUN -- CMD: $scriptPath -c $($cfg.jboss.config)"
         return
     }
 
-    # Set Java for the JBoss process
     $env:JAVA_HOME = $cfg.java.home
     $env:Path = "$($cfg.java.bin_dir);$env:Path"
 
-    Write-Log "INFO" "Using JAVA_HOME = $env:JAVA_HOME"
-    Write-Log "INFO" "java.exe = $(Join-Path $cfg.java.bin_dir 'java.exe')"
+    Write-Log "INFO" "JAVA_HOME=$env:JAVA_HOME"
+    Write-Log "INFO" "LAUNCHING: $scriptPath"
 
-    # NOTE: You can run standalone.bat directly; using cmd.exe /c works but provides less control
     $process = Start-Process `
         -FilePath "cmd.exe" `
         -ArgumentList "/c `"$scriptPath -c $($cfg.jboss.config)`"" `
@@ -435,27 +469,28 @@ function Start-JBoss {
         -WindowStyle Hidden `
         -PassThru
 
-
-    Write-Log "DEBUG" "Script Path: $scriptPath"
-    Write-Log "DEBUG" "Config: $($cfg.jboss.config)"
-    Write-Log "DEBUG" "Bin Dir: $($cfg.jboss.bin_dir)"
-
-    # Store PID for later stop/kill
     $process.Id | Out-File $PidFile -Force
 
-    # Wait until management port responds or until timeout
+    Write-Log "DEBUG" "SCRIPT   : $scriptPath"
+    Write-Log "DEBUG" "CONFIG   : $($cfg.jboss.config)"
+    Write-Log "DEBUG" "BIN DIR  : $($cfg.jboss.bin_dir)"
+
     $timeout = $cfg.jboss.startup_timeout
     $elapsed = 0
 
+    Write-Retro "  WAITING FOR MANAGEMENT PORT $($cfg.jboss.host):$($cfg.jboss.port) ..."
+    Write-Retro ""
+
     while ($elapsed -lt $timeout) {
-        Write-Progress -Activity "Waiting for JBoss..." `
-            -Status "$elapsed / $timeout sec" `
-            -PercentComplete (($elapsed / $timeout) * 100)
+        Write-TickerBar -Elapsed $elapsed -Total $timeout -Label "BOOT"
 
         $online = Test-Port -HostName $cfg.jboss.host -Port $cfg.jboss.port
 
         if ($online) {
-            Write-Log "INFO" "JBoss is ONLINE"
+            Write-Host ""
+            Write-Log "INFO" "JBOSS IS ONLINE"
+            Write-RetroOK "SERVER ONLINE  PID=$($process.Id)"
+            Write-Retro "  +-----------------------------------------------------------+"
             return
         }
 
@@ -463,7 +498,8 @@ function Start-JBoss {
         $elapsed++
     }
 
-    Die "Startup timeout exceeded"
+    Write-Host ""
+    Die "STARTUP TIMEOUT EXCEEDED AFTER $timeout SECONDS"
 }
 
 # ==============================
@@ -472,28 +508,37 @@ function Start-JBoss {
 
 function Stop-JBoss {
 
-    Write-Log "INFO" "Stopping JBoss"
+    Write-Log "INFO" "JBOSS SHUTDOWN SEQUENCE"
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | ISSUING SHUTDOWN COMMAND                                  |"
+    Write-Retro "  +-----------------------------------------------------------+"
 
     $cliPath = Join-Path $cfg.jboss.bin_dir "jboss-cli.bat"
     $controller = "$($cfg.jboss.host):$($cfg.jboss.port)"
 
-    # Attempt a graceful shutdown via CLI
     Start-Process `
         -FilePath $cliPath `
         -ArgumentList "--connect --controller=$controller --command=:shutdown" `
         -WorkingDirectory $cfg.jboss.bin_dir `
         -WindowStyle Hidden
 
-    # Wait until port is closed or until timeout
     $timeout = 30
     $elapsed = 0
 
+    Write-Retro "  WAITING FOR PORT CLOSURE..."
+    Write-Retro ""
+
     while ($elapsed -lt $timeout) {
+        Write-TickerBar -Elapsed $elapsed -Total $timeout -Label "SHUTDOWN"
+
         $online = Test-Port -HostName $cfg.jboss.host -Port $cfg.jboss.port
 
         if (-not $online) {
-            Write-Log "INFO" "JBoss fully stopped"
+            Write-Host ""
+            Write-Log "INFO" "JBOSS FULLY STOPPED"
+            Write-RetroOK "SERVER OFFLINE"
             Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+            Write-Retro "  +-----------------------------------------------------------+"
             return
         }
 
@@ -501,7 +546,10 @@ function Stop-JBoss {
         $elapsed++
     }
 
-    Write-Log "WARN" "Stop timeout exceeded"
+    Write-Host ""
+    Write-Log "WARN" "SHUTDOWN TIMEOUT EXCEEDED"
+    Write-RetroWarn "STOP TIMEOUT -- PROCESS MAY STILL BE RUNNING"
+    Write-Retro "  +-----------------------------------------------------------+"
 }
 
 # ==============================
@@ -509,34 +557,39 @@ function Stop-JBoss {
 # ==============================
 
 function Restart-JBoss {
-    Write-Log "INFO" "Restarting JBoss"
+    Write-Log "INFO" "RESTART SEQUENCE"
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | RESTART :: STOP THEN START                                |"
+    Write-Retro "  +-----------------------------------------------------------+"
     Stop-JBoss
     Start-JBoss
 }
 
 # ==============================
-# START & DEPLOY (combo)
+# START-DEPLOY (combo)
 # ==============================
 
 function Start-And-Deploy-Project {
-    # Clear screen and show the effective command line for context
     Clear-And-ShowLastCommand
     Deploy
     Start-JBoss
 }
 
 # ==============================
-# REMOVE Artifact from JBoss deployments
+# REMOVE ARTIFACT
 # ==============================
 
 function Remove-Artifact {
-    # Removes the deployed artifact file based on project settings
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | REMOVE ARTIFACT FROM DEPLOYMENTS                          |"
+    Write-Retro "  +-----------------------------------------------------------+"
+
     $deployDir = $cfg.jboss.deployments_dir
     $name = $cfg.project.artifact_name
     $packaging = if ($cfg.project.packaging) { $cfg.project.packaging } else { "war" }
 
     if (-not (Test-Path $deployDir)) {
-        Die "JBoss deployments directory not found: $deployDir"
+        Die "DEPLOYMENTS DIR NOT FOUND: $deployDir"
     }
 
     $pattern = "$name*.$packaging"
@@ -544,13 +597,12 @@ function Remove-Artifact {
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
     if (-not $artifact) {
-        Die "No artifact matching '$pattern' found under '$deployDir'"
+        Die "NO ARTIFACT MATCHING '$pattern' IN '$deployDir'"
     }
 
-    Write-Log "INFO" "Removing artifact: $($artifact.FullName)"
+    Write-Log "INFO" "REMOVING: $($artifact.FullName)"
 
     try {
-        # Remove deployment markers first, then the artifact
         @(
             "$($artifact.FullName).dodeploy", "$($artifact.FullName).deployed", "$($artifact.FullName).failed",
             "$($artifact.FullName).isdeploying", "$($artifact.FullName).isundeploying", "$($artifact.FullName).undeployed"
@@ -559,25 +611,32 @@ function Remove-Artifact {
         }
 
         Remove-Item $artifact.FullName -Force -ErrorAction Stop
-        
-        Write-Log "INFO" "Artifact removed successfully"
-        Write-Host "✔ Artifact removed" -ForegroundColor Green
+
+        Write-Log "INFO" "ARTIFACT REMOVED"
+        Write-RetroOK "ARTIFACT REMOVED SUCCESSFULLY"
     }
     catch {
-        Die "Failed to remove artifact: $($_.Exception.Message)"
+        Die "REMOVE FAILED: $($_.Exception.Message)"
     }
+
+    Write-Retro "  +-----------------------------------------------------------+"
 }
 
-# =============================
-# UNDEPLOYMENT
-# =============================
-function Unpublish-Artifact {
+# ==============================
+# UNDEPLOY
+# ==============================
+
+function Undeploy-Artifact {
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | UNDEPLOY SEQUENCE                                         |"
+    Write-Retro "  +-----------------------------------------------------------+"
+
     $cliPath = Join-Path $cfg.jboss.bin_dir "jboss-cli.bat"
     $controller = "$($cfg.jboss.host):$($cfg.jboss.port)"
     $deployDir = $cfg.jboss.deployments_dir
     $artifact = $cfg.project.artifact_name
     $packaging = if ($cfg.project.packaging) { $cfg.project.packaging } else { "ear" }
-    $argumentList = "--connect --controller=$controller --command=""undeploy $artifact.$packaging """ 
+    $argumentList = "--connect --controller=$controller --command=""undeploy $artifact.$packaging """
 
     Start-Process `
         -FilePath $cliPath `
@@ -590,17 +649,16 @@ function Unpublish-Artifact {
         $artifact = "$artifact.$packaging"
     }
 
-    
     $basePath = Join-Path $deployDir $artifact
-
-    
     $timeout = 60
     $elapsed = 0
 
-    while ($elapsed -lt $timeout) {
+    Write-Retro "  AWAITING UNDEPLOY CONFIRMATION..."
+    Write-Retro ""
 
-        Write-Log "INFO" "$basePath"
-      
+    while ($elapsed -lt $timeout) {
+        Write-TickerBar -Elapsed $elapsed -Total $timeout -Label "UNDEPLOY"
+
         $fileGone = (Test-Path $basePath)
         $isDeploying = (Test-Path "$($basePath).isdeploying")
         $isUndeploying = (Test-Path "$($basePath).isundeploying")
@@ -612,54 +670,63 @@ function Unpublish-Artifact {
         $noActiveMarkers = -not ($isDeploying -or $isUndeploying -or $deployed -or $doDeploy -or $failed)
 
         if ($fileGone -and ($undeployedMark -or $noActiveMarkers)) {
-            Write-Log "INFO" "Undeploy done: $artifact"
-            Write-Host "✔ Undeploy finished" -ForegroundColor Green
+            Write-Host ""
+            Write-Log "INFO" "UNDEPLOY CONFIRMED: $artifact"
+            Write-RetroOK "UNDEPLOY COMPLETE"
             break
         }
-
-        Write-Progress -Activity "Waiting undeploy..." `
-            -Status "Tempo decorrido: $elapsed s" `
-            -PercentComplete (($elapsed / $timeout) * 100)
 
         Start-Sleep -Seconds 1
         $elapsed++
     }
 
-    if ($elapsed -ge $timeout) {
-        Write-Log "WARN" "Timeout aguardando undeploy do artefato: $artifact"
-        Write-Host "⚠ Tempo esgotado aguardando undeploy" -ForegroundColor Yellow
-    }
-}
+    Write-Host ""
 
+    if ($elapsed -ge $timeout) {
+        Write-Log "WARN" "UNDEPLOY TIMEOUT: $artifact"
+        Write-RetroWarn "TIMEOUT WAITING FOR UNDEPLOY CONFIRMATION"
+    }
+
+    Write-Retro "  +-----------------------------------------------------------+"
+}
 
 # ==============================
 # STATUS
 # ==============================
 
 function Get-JBossStatus {
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro "  | SERVER STATUS REPORT                                      |"
+    Write-Retro "  +-----------------------------------------------------------+"
+    Write-Retro ""
 
-    "{0,-10} {1,-8} {2,-8} {3,-6}" -f "NAME", "STATUS", "PID", "PORT"
+    "  {0,-16} {1,-10} {2,-10} {3,-8}" -f "PROCESS", "STATUS", "PID", "PORT"
+    Write-Retro "  ------------------------------------------------"
 
     if (Test-Path $PidFile) {
-
         $jbossPid = Get-Content $PidFile
         $online = Test-Port -HostName $cfg.jboss.host -Port $cfg.jboss.port
 
         if ($online) {
-            "{0,-10} {1,-8} {2,-8} {3,-6}" -f "JBoss", "🟢", $jbossPid, $cfg.jboss.port
+            "  {0,-16} {1,-10} {2,-10} {3,-8}" -f "JBOSS", "ONLINE", $jbossPid, $cfg.jboss.port
+            Write-Retro ""
+            Write-RetroOK "SERVER IS RESPONDING ON MANAGEMENT PORT"
+            Write-Retro "  +-----------------------------------------------------------+"
             return
         }
     }
 
-    "{0,-10} {1,-8} {2,-8} {3,-6}" -f "JBoss", "🔴", "-", "-"
+    "  {0,-16} {1,-10} {2,-10} {3,-8}" -f "JBOSS", "OFFLINE", "-", "-"
+    Write-Retro ""
+    Write-RetroWarn "SERVER IS NOT RESPONDING"
+    Write-Retro "  +-----------------------------------------------------------+"
 }
 
 # ==============================
-# COMMAND LINE ECHO (for clear/visibility)
+# COMMAND LINE ECHO
 # ==============================
 
 function Get-EffectiveCommandLine {
-    # Reconstructs the effective command line for display purposes
     $scriptPath = $PSCommandPath
     if (-not $scriptPath) {
         $scriptPath = $MyInvocation.MyCommand.Path
@@ -674,18 +741,20 @@ function Get-EffectiveCommandLine {
     if ($VerboseLog) { $parts.Add('-VerboseLog') }
     if ($Help) { $parts.Add('-Help') }
 
-    # If additional command-level parameters exist in the future, append them here.
-
     return ($parts -join ' ')
 }
 
 function Clear-And-ShowLastCommand {
     param(
-        [ConsoleColor]$Color = 'DarkGray'
+        [ConsoleColor]$Color = 'DarkGreen'
     )
     $cmdLine = Get-EffectiveCommandLine
     Clear-Host
-    Write-Host $cmdLine -ForegroundColor $Color
+    $Host.UI.RawUI.ForegroundColor = 'Green'
+    Write-Host ""
+    Write-Host "  >> $cmdLine" -ForegroundColor $Color
+    Write-Host ""
+    Show-Banner
 }
 
 # ==============================
@@ -699,13 +768,13 @@ switch ($Command) {
     "remove" { Clear-And-ShowLastCommand; Remove-Artifact }
     "status" { Clear-And-ShowLastCommand; Get-JBossStatus }
     "deploy" { Clear-And-ShowLastCommand; Deploy }
-    "undeploy" { Clear-And-ShowLastCommand; Unpublish-Artifact }
-    "start-deploy" { Clear-And-ShowLastCommand; Deploy; Start-JBoss }    
+    "undeploy" { Clear-And-ShowLastCommand; Undeploy-Artifact }
+    "start-deploy" { Clear-And-ShowLastCommand; Deploy; Start-JBoss }
     default {
         Clear-And-ShowLastCommand
-        Write-Host "Command or option invalided $Command" -ForegroundColor Red
+        Write-RetroError "UNRECOGNIZED COMMAND: $Command"
+        Write-Host ""
         Show-Help
         exit 1
     }
-
 }
