@@ -19,6 +19,9 @@ CLI corporativa para automação de build, deploy e gerenciamento do JBoss/WildF
 
 ---
 
+## Imagens 
+![Tela Execução](imagem.gif)
+
 ## ✨ Funcionalidades
 
 | Recurso | Descrição |
